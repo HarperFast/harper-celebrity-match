@@ -260,19 +260,22 @@ export class CelebrityLookalike extends Resource {
 
 	async get(target) {
 		target.checkPermission = false
-		let count = 0
-		const iter = tables.Celebrity.search({ limit: 1, sort: { attribute: 'id' } })
-		for await (const _ of iter) count = 1
-		// Cheap count: ask LMDB how many records via a full scan with count-only.
-		// (Harper exposes a count() helper but compatibility varies; iterating is safe.)
+		// Best-effort stats — harper's search() requires an indexed condition or
+		// no condition. We just iterate and count; the dataset is small (<1k).
 		let total = 0
-		for await (const _ of tables.Celebrity.search({ limit: 5000, select: ['id'] })) total++
-
-		let lastImport = null
-		for await (const r of tables.ImportLog.search({ limit: 5000, select: ['finishedAt'] })) {
-			if (r.finishedAt && (!lastImport || r.finishedAt > lastImport)) lastImport = r.finishedAt
+		try {
+			for await (const _ of tables.Celebrity.search({})) total++
+		} catch {
+			// table not yet present — render the empty state
 		}
-
+		let lastImport = null
+		try {
+			for await (const r of tables.ImportLog.search({})) {
+				if (r.finishedAt && (!lastImport || r.finishedAt > lastImport)) lastImport = r.finishedAt
+			}
+		} catch {
+			// ignore
+		}
 		return new Response(renderHtml(total, lastImport), {
 			headers: { 'Content-Type': 'text/html; charset=utf-8' },
 		})

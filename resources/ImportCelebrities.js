@@ -100,7 +100,16 @@ export class ImportCelebrities extends Resource {
 
 	async post(target) {
 		target.checkPermission = false
-		const body = (await target.json?.()) ?? {}
-		return runImport({ subset: body?.subset })
+		// The Harper Resource shape is inconsistent across versions — `target` is
+		// sometimes the parsed body itself, sometimes a wrapper exposing .json().
+		// Try both so the demo can be driven from curl with either JSON or no body.
+		let body = {}
+		if (target && typeof target === 'object' && !target.json && !target.body) {
+			body = target
+		} else if (typeof target?.json === 'function') {
+			try { body = await target.json() } catch { body = {} }
+		}
+		const subset = Number.isFinite(body?.subset) ? Number(body.subset) : undefined
+		return runImport({ subset })
 	}
 }
