@@ -3,7 +3,7 @@ import { Resource, tables } from 'harperdb'
 function renderHtml(celebCount, lastImport) {
 	const meta = celebCount
 		? `${celebCount} celebrities indexed${lastImport ? ` · last refresh ${new Date(lastImport).toLocaleString()}` : ''}`
-		: 'Not yet imported — POST /Import to populate the celebrity database.'
+		: 'Not yet imported — POST /ImportCelebrities to populate the celebrity database.'
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -208,7 +208,7 @@ $go.addEventListener('click', async () => {
 	$results.innerHTML = '<div class="empty">Comparing against the celebrity index…</div>'
 	try {
 		const dataUrl = await readAsDataUrl(currentFile)
-		const res = await fetch('/Match', {
+		const res = await fetch('/MatchCelebrity', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ image: dataUrl }),
@@ -255,7 +255,7 @@ $go.addEventListener('click', async () => {
 </html>`
 }
 
-export class Lookalike extends Resource {
+export class CelebrityLookalike extends Resource {
 	static loadAsInstance = false
 
 	async get(target) {

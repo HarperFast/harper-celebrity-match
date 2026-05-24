@@ -10,9 +10,9 @@ Upload a photo, find the celebrity you most look like — a Harper multimodal-ve
 
 | Method | Path | Description |
 |---|---|---|
-| `GET`  | `/Lookalike` | Demo page with drag-drop image upload |
-| `POST` | `/Match`     | Body = JSON `{ image: "data:image/jpeg;base64,…" }` or raw image bytes. Returns top-N celebrity matches |
-| `POST` | `/Import`    | Body = JSON `{ subset?: number }` — pulls Wikipedia summaries, downloads thumbnails, embeds and stores. Idempotent |
+| `GET`  | `/CelebrityLookalike` | Demo page with drag-drop image upload |
+| `POST` | `/MatchCelebrity`     | Body = JSON `{ image: "data:image/jpeg;base64,…" }` or raw image bytes. Returns top-N celebrity matches |
+| `POST` | `/ImportCelebrities`    | Body = JSON `{ subset?: number }` — pulls Wikipedia summaries, downloads thumbnails, embeds and stores. Idempotent |
 
 ## Bring-up
 

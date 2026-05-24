@@ -29,7 +29,7 @@ async function readImage(target) {
 	return { bytes, mime: ct.split(';')[0].trim() || 'image/jpeg' }
 }
 
-export class Match extends Resource {
+export class MatchCelebrity extends Resource {
 	static loadAsInstance = false
 
 	async post(target) {

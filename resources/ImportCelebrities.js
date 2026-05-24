@@ -95,7 +95,7 @@ async function runImport(options) {
 	}
 }
 
-export class Import extends Resource {
+export class ImportCelebrities extends Resource {
 	static loadAsInstance = false
 
 	async post(target) {
