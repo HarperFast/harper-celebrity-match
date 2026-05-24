@@ -59,6 +59,31 @@ async function downloadImage(url) {
 	return { bytes, mime }
 }
 
+// Process a single celebrity. Sleeps `FETCH_DELAY_MS` AFTER any real fetch
+// (skip cached entries don't pay the throttle).
+async function importOne(entry) {
+	const existing = await tables.Celebrity.get(entry.title)
+	if (existing?.embedding?.length) return { skipped: true }
+
+	const summary = await fetchWikiSummary(entry.title)
+	if (summary.error) return { error: summary.error }
+
+	const { bytes, mime } = await downloadImage(summary.thumbnailUrl)
+	const vector = await embedImageBytes(bytes, mime)
+
+	await tables.Celebrity.put({
+		id: entry.title,
+		name: summary.title,
+		category: entry.category,
+		wikipediaUrl: summary.pageUrl,
+		photoUrl: summary.thumbnailUrl,
+		blurb: summary.description || summary.extract.slice(0, 240),
+		embedding: vector,
+	})
+	await sleep(FETCH_DELAY_MS)
+	return { imported: true }
+}
+
 async function runImport(options) {
 	const startedAt = new Date().toISOString()
 	const requested = options?.subset ? CELEBRITIES.slice(0, options.subset) : CELEBRITIES
@@ -68,37 +93,13 @@ async function runImport(options) {
 
 	for (const entry of requested) {
 		try {
-			const existing = await tables.Celebrity.get(entry.title)
-			if (existing?.embedding?.length) {
-				skipped++
-				continue
-			}
-
-			const summary = await fetchWikiSummary(entry.title)
-			if (summary.error) {
-				errors.push(summary.error)
-				continue
-			}
-
-			const { bytes, mime } = await downloadImage(summary.thumbnailUrl)
-			const vector = await embedImageBytes(bytes, mime)
-
-			await tables.Celebrity.put({
-				id: entry.title,
-				name: summary.title,
-				category: entry.category,
-				wikipediaUrl: summary.pageUrl,
-				photoUrl: summary.thumbnailUrl,
-				blurb: summary.description || summary.extract.slice(0, 240),
-				embedding: vector,
-			})
-			imported++
+			const r = await importOne(entry)
+			if (r.skipped) skipped++
+			else if (r.imported) imported++
+			else if (r.error) errors.push(r.error)
 		} catch (e) {
 			errors.push(`${entry.title}: ${String(e.message || e)}`)
 		}
-		// Throttle Wikipedia requests to dodge the 429 cliff. Cheap compared to
-		// the embedding cost (~250ms tax on a ~1.5s/entry pipeline).
-		await sleep(FETCH_DELAY_MS)
 	}
 
 	const finishedAt = new Date().toISOString()
@@ -124,14 +125,17 @@ async function runImport(options) {
 	}
 }
 
+// In-process flag so concurrent POSTs don't fan out multiple parallel imports
+// against Wikipedia. The flag clears when the background runImport finishes
+// (or throws). Survives across requests inside the same worker, but not across
+// worker threads — that's fine for a demo.
+let importInFlight = null
+
 export class ImportCelebrities extends Resource {
 	static loadAsInstance = false
 
 	async post(target) {
 		target.checkPermission = false
-		// The Harper Resource shape is inconsistent across versions — `target` is
-		// sometimes the parsed body itself, sometimes a wrapper exposing .json().
-		// Try both so the demo can be driven from curl with either JSON or no body.
 		let body = {}
 		if (target && typeof target === 'object' && !target.json && !target.body) {
 			body = target
@@ -139,6 +143,19 @@ export class ImportCelebrities extends Resource {
 			try { body = await target.json() } catch { body = {} }
 		}
 		const subset = Number.isFinite(body?.subset) ? Number(body.subset) : undefined
-		return runImport({ subset })
+
+		if (importInFlight) {
+			return { ok: false, status: 'already_running' }
+		}
+		// Detach the run from the request lifecycle: returning immediately means
+		// the Harper HTTP layer doesn't hold the socket open past its 60s cap,
+		// and the inner fetch() AbortSignals stay un-aborted because nothing is
+		// awaiting us. Caller polls GET /CelebrityLookalike (or scope the table)
+		// to see progress.
+		importInFlight = runImport({ subset })
+			.catch((e) => ({ ok: false, error: String(e.message || e) }))
+			.finally(() => { importInFlight = null })
+
+		return { ok: true, status: 'started', subset: subset ?? CELEBRITIES.length }
 	}
 }

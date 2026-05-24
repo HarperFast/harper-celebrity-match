@@ -4,29 +4,29 @@ import { embedImageBytes } from '../lib/embed.js'
 const DEFAULT_LIMIT = 5
 const MAX_BYTES = 8 * 1024 * 1024 // 8 MB cap on uploads
 
-// Accept the uploaded image as raw body. Returns Buffer + mime.
+// Accept the uploaded image. The frontend sends JSON
+// `{ image: "data:image/...;base64,..." }`, which Harper parses for us — so
+// `target` is the parsed JSON body directly in current harper-pro builds.
 async function readImage(target) {
-	const ct = target.headers?.['content-type'] || target.req?.headers?.['content-type'] || ''
-	// Streamed binary body — Harper passes the request body through target.body
-	// or via target.arrayBuffer() depending on version. Try both.
-	let bytes
-	if (typeof target.arrayBuffer === 'function') {
-		bytes = new Uint8Array(await target.arrayBuffer())
-	} else if (target.body instanceof Uint8Array || Buffer.isBuffer?.(target.body)) {
-		bytes = target.body
-	} else if (typeof target.body === 'string') {
-		// Allow base64 JSON: { "image": "data:image/jpeg;base64,..." }
-		const parsed = JSON.parse(target.body)
-		const m = /^data:([^;]+);base64,(.+)$/.exec(parsed.image || '')
-		if (!m) throw Object.assign(new Error('expected data URL in body.image'), { statusCode: 400 })
-		return { bytes: Buffer.from(m[2], 'base64'), mime: m[1] }
-	} else {
-		throw Object.assign(new Error('no image body found'), { statusCode: 400 })
+	let body
+	if (target && typeof target === 'object' && !target.json && !target.body && typeof target.image === 'string') {
+		body = target
+	} else if (typeof target?.json === 'function') {
+		try { body = await target.json() } catch { body = null }
 	}
+	const dataUrl = body?.image
+	if (typeof dataUrl !== 'string') {
+		throw Object.assign(new Error('expected JSON body { image: "data:image/...;base64,..." }'), { statusCode: 400 })
+	}
+	const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl)
+	if (!m) {
+		throw Object.assign(new Error('image must be a base64 data URL'), { statusCode: 400 })
+	}
+	const bytes = Buffer.from(m[2], 'base64')
 	if (bytes.length > MAX_BYTES) {
 		throw Object.assign(new Error(`image too large (>${MAX_BYTES / 1024 / 1024} MB)`), { statusCode: 413 })
 	}
-	return { bytes, mime: ct.split(';')[0].trim() || 'image/jpeg' }
+	return { bytes, mime: m[1] }
 }
 
 export class MatchCelebrity extends Resource {
