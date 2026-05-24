@@ -1,0 +1,19 @@
+type Celebrity @table @export {
+  id: ID @primaryKey
+  name: String @indexed
+  category: String @indexed
+  wikipediaUrl: String
+  photoUrl: String
+  blurb: String
+  embedding: [Float] @indexed(type: "HNSW", distance: "cosine")
+}
+
+type ImportLog @table @export {
+  id: ID @primaryKey
+  startedAt: String
+  finishedAt: String
+  totalRequested: Int
+  totalImported: Int
+  totalSkipped: Int
+  errors: [String]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "harper-celebrity-match",
+  "version": "0.1.0",
+  "description": "Upload an image, find the celebrity you most look like — Harper multimodal embedding demo",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0"
+}
