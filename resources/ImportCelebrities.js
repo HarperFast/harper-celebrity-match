@@ -134,15 +134,9 @@ let importInFlight = null
 export class ImportCelebrities extends Resource {
 	static loadAsInstance = false
 
-	async post(target) {
+	async post(target, data) {
 		target.checkPermission = false
-		let body = {}
-		if (target && typeof target === 'object' && !target.json && !target.body) {
-			body = target
-		} else if (typeof target?.json === 'function') {
-			try { body = await target.json() } catch { body = {} }
-		}
-		const subset = Number.isFinite(body?.subset) ? Number(body.subset) : undefined
+		const subset = Number.isFinite(data?.subset) ? Number(data.subset) : undefined
 
 		if (importInFlight) {
 			return { ok: false, status: 'already_running' }

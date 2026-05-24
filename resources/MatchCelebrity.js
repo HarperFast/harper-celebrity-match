@@ -2,63 +2,78 @@ import { Resource, tables } from 'harperdb'
 import { embedImageBytes } from '../lib/embed.js'
 
 const DEFAULT_LIMIT = 5
-const MAX_BYTES = 8 * 1024 * 1024 // 8 MB cap on uploads
+const MAX_BYTES = 8 * 1024 * 1024
 
-// Accept the uploaded image. The frontend sends JSON
-// `{ image: "data:image/...;base64,..." }`, which Harper parses for us — so
-// `target` is the parsed JSON body directly in current harper-pro builds.
-async function readImage(target) {
-	let body
-	if (target && typeof target === 'object' && !target.json && !target.body && typeof target.image === 'string') {
-		body = target
-	} else if (typeof target?.json === 'function') {
-		try { body = await target.json() } catch { body = null }
+function cosineDistance(a, b) {
+	let dot = 0, na = 0, nb = 0
+	for (let i = 0; i < a.length; i++) {
+		dot += a[i] * b[i]
+		na += a[i] * a[i]
+		nb += b[i] * b[i]
 	}
-	const dataUrl = body?.image
-	if (typeof dataUrl !== 'string') {
-		throw Object.assign(new Error('expected JSON body { image: "data:image/...;base64,..." }'), { statusCode: 400 })
-	}
-	const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl)
-	if (!m) {
-		throw Object.assign(new Error('image must be a base64 data URL'), { statusCode: 400 })
-	}
-	const bytes = Buffer.from(m[2], 'base64')
-	if (bytes.length > MAX_BYTES) {
-		throw Object.assign(new Error(`image too large (>${MAX_BYTES / 1024 / 1024} MB)`), { statusCode: 413 })
-	}
-	return { bytes, mime: m[1] }
+	const denom = Math.sqrt(na) * Math.sqrt(nb)
+	return denom === 0 ? 1 : 1 - dot / denom
 }
 
 export class MatchCelebrity extends Resource {
 	static loadAsInstance = false
 
-	async post(target) {
+	async post(target, data) {
 		target.checkPermission = false
-		const { bytes, mime } = await readImage(target)
+		const dataUrl = data?.image
+		if (typeof dataUrl !== 'string') {
+			const err = new Error('expected JSON body { image: "data:image/...;base64,..." }')
+			err.statusCode = 400
+			throw err
+		}
+		const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl)
+		if (!m) {
+			const err = new Error('image must be a base64 data URL')
+			err.statusCode = 400
+			throw err
+		}
+		const bytes = Buffer.from(m[2], 'base64')
+		if (bytes.length > MAX_BYTES) {
+			const err = new Error(`image too large (>${MAX_BYTES / 1024 / 1024} MB)`)
+			err.statusCode = 413
+			throw err
+		}
+		const limit = Math.min(Math.max(parseInt(data?.limit, 10) || DEFAULT_LIMIT, 1), 20)
 
-		const limitParam = parseInt(target.url?.searchParams?.get('limit') ?? '', 10)
-		const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 20) : DEFAULT_LIMIT
+		const queryVector = await embedImageBytes(bytes, m[1])
 
-		const queryVector = await embedImageBytes(bytes, mime)
-
-		// HNSW similarity search: closest N celebrities by cosine distance.
-		// Harper's `search` accepts `vector` + `limit`; results include `distance`.
-		const hits = []
+		// HNSW search: pull a wider candidate set than `limit` because the
+		// HNSW iterator isn't guaranteed distance-ordered, then rank by exact
+		// cosine distance ourselves and take the top N.
+		const candidates = []
 		const iter = tables.Celebrity.search({
-			conditions: [{ attribute: 'embedding', value: queryVector, operator: 'cosine' }],
-			limit,
+			conditions: {
+				attribute: 'embedding',
+				comparator: 'lt',
+				value: 2,
+				target: queryVector,
+			},
+			limit: Math.max(50, limit * 5),
 		})
 		for await (const r of iter) {
-			hits.push({
-				name: r.name,
-				category: r.category,
-				wikipediaUrl: r.wikipediaUrl,
-				photoUrl: r.photoUrl,
-				blurb: r.blurb,
-				distance: r.distance ?? r.score ?? null,
+			if (!r.embedding) continue
+			candidates.push({
+				row: r,
+				distance: cosineDistance(queryVector, r.embedding),
 			})
 		}
+		candidates.sort((a, b) => a.distance - b.distance)
 
-		return { matches: hits, model: 'multimodal-clip' }
+		return {
+			matches: candidates.slice(0, limit).map(({ row, distance }) => ({
+				name: row.name,
+				category: row.category,
+				wikipediaUrl: row.wikipediaUrl,
+				photoUrl: row.photoUrl,
+				blurb: row.blurb,
+				distance,
+			})),
+			model: 'multimodal-clip',
+		}
 	}
 }
