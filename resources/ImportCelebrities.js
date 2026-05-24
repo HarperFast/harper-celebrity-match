@@ -5,10 +5,36 @@ import { embedImageBytes } from '../lib/embed.js'
 const WIKI_BASE = 'https://en.wikipedia.org/api/rest_v1/page/summary'
 const UA = 'harper-celebrity-match/0.1 (+https://github.com/HarperFast/harper-celebrity-match)'
 
+// Wikipedia upload.wikimedia.org rate-limits unauthenticated bulk fetches.
+// 250ms between requests keeps us comfortably under their threshold without
+// dragging the full ~200-entry import past a minute or two.
+const FETCH_DELAY_MS = 250
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function fetchWithRetry(url, init, attempts = 3) {
+	let lastErr
+	for (let i = 0; i < attempts; i++) {
+		try {
+			const res = await fetch(url, init)
+			// 429 from upload.wikimedia.org — back off and retry.
+			if (res.status === 429 && i < attempts - 1) {
+				await sleep(1500 * (i + 1))
+				continue
+			}
+			return res
+		} catch (e) {
+			lastErr = e
+			await sleep(500 * (i + 1))
+		}
+	}
+	if (lastErr) throw lastErr
+	throw new Error(`fetch failed after ${attempts} attempts`)
+}
+
 // Fetch Wikipedia summary JSON for a page title.
 async function fetchWikiSummary(title) {
 	const url = `${WIKI_BASE}/${encodeURIComponent(title)}`
-	const res = await fetch(url, { headers: { 'User-Agent': UA } })
+	const res = await fetchWithRetry(url, { headers: { 'User-Agent': UA } })
 	if (!res.ok) return { error: `wiki ${res.status} for "${title}"` }
 	const data = await res.json()
 	const thumb = data.thumbnail?.source || data.originalimage?.source
@@ -26,7 +52,7 @@ async function fetchWikiSummary(title) {
 // Download an image with a proper User-Agent. vLLM's internal fetcher uses a
 // default UA that Wikipedia rate-limits aggressively, so we relay the bytes.
 async function downloadImage(url) {
-	const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'image/*' } })
+	const res = await fetchWithRetry(url, { headers: { 'User-Agent': UA, Accept: 'image/*' } })
 	if (!res.ok) throw new Error(`download ${res.status} ${url}`)
 	const mime = res.headers.get('content-type') || 'image/jpeg'
 	const bytes = new Uint8Array(await res.arrayBuffer())
@@ -70,6 +96,9 @@ async function runImport(options) {
 		} catch (e) {
 			errors.push(`${entry.title}: ${String(e.message || e)}`)
 		}
+		// Throttle Wikipedia requests to dodge the 429 cliff. Cheap compared to
+		// the embedding cost (~250ms tax on a ~1.5s/entry pipeline).
+		await sleep(FETCH_DELAY_MS)
 	}
 
 	const finishedAt = new Date().toISOString()
