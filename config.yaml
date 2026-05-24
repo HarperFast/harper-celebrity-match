@@ -1,2 +1,9 @@
-resources: resources/*.js
-schemas: schemas/*.graphql
+# yaml-language-server: $schema=./node_modules/harperdb/config-app.schema.json
+
+rest: true
+
+graphqlSchema:
+  files: 'schemas/*.graphql'
+
+jsResource:
+  files: 'resources/*.js'
