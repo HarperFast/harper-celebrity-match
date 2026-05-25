@@ -36,16 +36,29 @@ export class MatchCelebrityV2 extends Resource {
 		const queryVector = await embedImageBytes(bytes, m[1])
 
 		// Trust the HNSW iterator's distance-ascending order, ask it to
-		// fetch exactly `limit` records, and select $distance as a
-		// metadata column so the client gets it back without JS work.
+		// fetch exactly `limit` records.
 		const matches = []
+		const debugFirstEntry = []
 		const iter = tables.Celebrity.search({
 			conditions: { attribute: 'embedding', comparator: 'lt', value: 2, target: queryVector },
 			limit,
 			select: ['name', 'category', 'wikipediaUrl', 'photoUrl', 'blurb', '$distance'],
 		})
-		for await (const r of iter) matches.push(r)
+		for await (const r of iter) {
+			if (debugFirstEntry.length === 0) {
+				// Capture the raw row shape — what keys, what's $distance / .distance, etc.
+				debugFirstEntry.push({
+					ownKeys: Object.keys(r),
+					hasDistance: 'distance' in r,
+					hasDollarDistance: '$distance' in r,
+					distanceValue: r.distance,
+					dollarDistanceValue: r.$distance,
+					toJSON: typeof r.toJSON,
+				})
+			}
+			matches.push(r)
+		}
 
-		return { matches, model: 'multimodal-clip', strategy: 'iterator-order' }
+		return { matches, debug: debugFirstEntry[0], model: 'multimodal-clip', strategy: 'iterator-order' }
 	}
 }
