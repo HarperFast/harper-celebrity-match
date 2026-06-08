@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harperdb'
+import { Resource, tables } from 'harper'
 import { CELEBRITIES } from '../lib/celebrities.js'
 import { embedImageBytes } from '../lib/embed.js'
 

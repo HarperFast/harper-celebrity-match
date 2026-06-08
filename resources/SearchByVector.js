@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harperdb'
+import { Resource, tables } from 'harper'
 
 // Benchmark helper — accepts a precomputed embedding vector and returns the
 // HNSW search result without paying the embed cost. Used to isolate vector

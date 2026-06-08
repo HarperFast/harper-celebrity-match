@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harperdb'
+import { Resource, tables } from 'harper'
 
 function renderHtml(celebCount, lastImport) {
 	const meta = celebCount

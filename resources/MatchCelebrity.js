@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harperdb'
+import { Resource, tables } from 'harper'
 import { embedImageBytes } from '../lib/embed.js'
 
 const DEFAULT_LIMIT = 5

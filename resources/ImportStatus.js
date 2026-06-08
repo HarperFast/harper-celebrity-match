@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harperdb'
+import { Resource, tables } from 'harper'
 
 export class ImportStatus extends Resource {
 	static loadAsInstance = false
