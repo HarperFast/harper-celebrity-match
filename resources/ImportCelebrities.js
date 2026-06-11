@@ -86,7 +86,7 @@ async function importOne(entry) {
 
 async function runImport(options) {
 	const startedAt = new Date().toISOString()
-	const requested = options?.subset ? CELEBRITIES.slice(0, options.subset) : CELEBRITIES
+	const requested = options?.subset != null ? CELEBRITIES.slice(0, options.subset) : CELEBRITIES
 	let imported = 0
 	let skipped = 0
 	const errors = []
