@@ -278,7 +278,15 @@ void suite('harper-celebrity-match', (ctx: ContextWithHarper) => {
 
   void test('POST /ImportCelebrities returns started or already_running status', async () => {
     // We fire a POST with subset=0 to avoid actually hitting Wikipedia/vLLM.
-    // With subset=0 the slice is empty so runImport finishes immediately.
+    // This depends on ImportCelebrities.js treating 0 as an explicit subset
+    // (`subset != null`, not a truthiness check) — under a truthiness check 0
+    // falls back to the full CELEBRITIES list and this test would kick off a
+    // real Wikipedia + vLLM import. `runImport` therefore gets an empty slice
+    // and finishes immediately.
+    const before = (await (await authFetch(ctx, '/ImportStatus')).json()) as {
+      lastFinishedAt: string | null;
+    };
+
     const res = await authFetch(ctx, '/ImportCelebrities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -294,5 +302,25 @@ void suite('harper-celebrity-match', (ctx: ContextWithHarper) => {
       body.status === 'started' || body.status === 'already_running',
       `Unexpected status: ${body.status}`,
     );
+
+    if (body.status !== 'started') return;
+
+    // The POST detaches runImport from the request, so it is still in flight
+    // when the response lands. Drain it here — by waiting for the ImportLog it
+    // writes on completion — so the background task cannot bleed into later
+    // tests or outlive teardownHarper. With an empty slice this settles almost
+    // immediately; a timeout here means subset=0 did NOT produce a no-op.
+    let settled = false;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const status = (await (await authFetch(ctx, '/ImportStatus')).json()) as {
+        lastFinishedAt: string | null;
+      };
+      if (status.lastFinishedAt && status.lastFinishedAt !== before.lastFinishedAt) {
+        settled = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    ok(settled, 'background import from subset=0 did not finish within 5s — expected a no-op');
   });
 });
