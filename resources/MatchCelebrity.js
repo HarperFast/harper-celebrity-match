@@ -16,10 +16,15 @@ function cosineDistance(a, b) {
 }
 
 export class MatchCelebrity extends Resource {
-	static loadAsInstance = false
-
-	async post(target, data) {
+	// v5: endpoints are implemented as static methods. Harper's REST layer
+	// dispatches directly to them with the RequestTarget, so no instance is
+	// constructed and the `loadAsInstance = false` opt-out is no longer needed.
+	static async post(target, data) {
 		target.checkPermission = false
+		// REST deserializes the request body lazily, so a static `post` receives
+		// `data` as a promise — the base class's instance dispatch used to await it
+		// on our behalf. Resolve it before touching any field.
+		data = await data
 		const dataUrl = data?.image
 		if (typeof dataUrl !== 'string') {
 			const err = new Error('expected JSON body { image: "data:image/...;base64,..." }')

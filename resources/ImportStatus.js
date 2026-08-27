@@ -1,9 +1,10 @@
 import { Resource, tables } from 'harper'
 
 export class ImportStatus extends Resource {
-	static loadAsInstance = false
-
-	async get(target) {
+	// v5: endpoints are implemented as static methods. Harper's REST layer
+	// dispatches directly to them with the RequestTarget, so no instance is
+	// constructed and the `loadAsInstance = false` opt-out is no longer needed.
+	static async get(target) {
 		target.checkPermission = false
 		let total = 0
 		try {

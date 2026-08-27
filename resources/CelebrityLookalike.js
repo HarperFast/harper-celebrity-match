@@ -256,9 +256,10 @@ $go.addEventListener('click', async () => {
 }
 
 export class CelebrityLookalike extends Resource {
-	static loadAsInstance = false
-
-	async get(target) {
+	// v5: endpoints are implemented as static methods. Harper's REST layer
+	// dispatches directly to them with the RequestTarget, so no instance is
+	// constructed and the `loadAsInstance = false` opt-out is no longer needed.
+	static async get(target) {
 		target.checkPermission = false
 		// Best-effort stats — harper's search() requires an indexed condition or
 		// no condition. We just iterate and count; the dataset is small (<1k).

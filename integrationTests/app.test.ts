@@ -254,9 +254,11 @@ void suite('harper-celebrity-match', (ctx: ContextWithHarper) => {
   });
 
   // ── POST /MatchCelebrity — embedding-unavailable path ─────────────────────
-  // The endpoint requires a multimodal embedding service (vLLM). In CI,
-  // the service is not available, so we verify the request validation layer
-  // only (bad input returns 4xx without ever calling the embedding service).
+  // The endpoint requires a multimodal embedding service (vLLM), which is not
+  // available in CI. We cover the request validation layer (bad input returns
+  // 4xx without ever calling the embedding service) plus the one step past it:
+  // that a well-formed request actually reaches lib/embed.js and gets a clean
+  // "not configured" answer out of it.
 
   void test('POST /MatchCelebrity returns 400 when image field is missing', async () => {
     const res = await authFetch(ctx, '/MatchCelebrity', {
@@ -274,6 +276,28 @@ void suite('harper-celebrity-match', (ctx: ContextWithHarper) => {
       body: JSON.stringify({ image: 'not-a-data-url' }),
     });
     strictEqual(res.status, 400, 'Expected 400 for non-data-URL image');
+  });
+
+  void test('POST /MatchCelebrity surfaces 503 when the embedding service is unconfigured', async () => {
+    // A 1x1 transparent GIF as a data URL — well-formed enough to clear
+    // MatchCelebrity's validation and fall through to readMultimodalConfig().
+    // With no vLLM configured this must surface as the explicit 503 that
+    // lib/embed.js throws. Guards the config plumbing itself: embed.js reads
+    // `server.config` off the `harper` package export (not `globalThis.server`,
+    // which the v5 VM module loader does not guarantee), and a broken read there
+    // would land here as a 500 rather than a 503.
+    const res = await authFetch(ctx, '/MatchCelebrity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+      }),
+    });
+    strictEqual(
+      res.status,
+      503,
+      `Expected 503 from an unconfigured embedding service, got ${res.status}`,
+    );
   });
 
   void test('POST /ImportCelebrities returns started or already_running status', async () => {

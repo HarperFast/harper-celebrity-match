@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harper'
+import { Resource, tables, transaction } from 'harper'
 import { CELEBRITIES } from '../lib/celebrities.js'
 import { embedImageBytes } from '../lib/embed.js'
 
@@ -10,6 +10,15 @@ const UA = 'harper-celebrity-match/0.1 (+https://github.com/HarperFast/harper-ce
 // dragging the full ~200-entry import past a minute or two.
 const FETCH_DELAY_MS = 250
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// v5 propagates the active transaction through async context. `runImport` is
+// deliberately detached from the POST that starts it, so every table call it
+// makes would otherwise inherit the request's transaction — which Harper has
+// already committed by the time the response is written. Handing `transaction()`
+// a fresh context object opens a NEW transaction instead of joining the ambient
+// one, and swaps the async context for the duration of the callback, so each
+// unit of work commits on its own.
+const inNewTransaction = (fn) => transaction({}, fn)
 
 async function fetchWithRetry(url, init, attempts = 3) {
 	let lastErr
@@ -62,7 +71,7 @@ async function downloadImage(url) {
 // Process a single celebrity. Sleeps `FETCH_DELAY_MS` AFTER any real fetch
 // (skip cached entries don't pay the throttle).
 async function importOne(entry) {
-	const existing = await tables.Celebrity.get(entry.title)
+	const existing = await inNewTransaction(() => tables.Celebrity.get(entry.title))
 	if (existing?.embedding?.length) return { skipped: true }
 
 	const summary = await fetchWikiSummary(entry.title)
@@ -71,15 +80,17 @@ async function importOne(entry) {
 	const { bytes, mime } = await downloadImage(summary.thumbnailUrl)
 	const vector = await embedImageBytes(bytes, mime)
 
-	await tables.Celebrity.put({
-		id: entry.title,
-		name: summary.title,
-		category: entry.category,
-		wikipediaUrl: summary.pageUrl,
-		photoUrl: summary.thumbnailUrl,
-		blurb: summary.description || summary.extract.slice(0, 240),
-		embedding: vector,
-	})
+	await inNewTransaction(() =>
+		tables.Celebrity.put({
+			id: entry.title,
+			name: summary.title,
+			category: entry.category,
+			wikipediaUrl: summary.pageUrl,
+			photoUrl: summary.thumbnailUrl,
+			blurb: summary.description || summary.extract.slice(0, 240),
+			embedding: vector,
+		}),
+	)
 	await sleep(FETCH_DELAY_MS)
 	return { imported: true }
 }
@@ -104,15 +115,17 @@ async function runImport(options) {
 
 	const finishedAt = new Date().toISOString()
 	const logId = `import-${Date.now()}`
-	await tables.ImportLog.put({
-		id: logId,
-		startedAt,
-		finishedAt,
-		totalRequested: requested.length,
-		totalImported: imported,
-		totalSkipped: skipped,
-		errors,
-	})
+	await inNewTransaction(() =>
+		tables.ImportLog.put({
+			id: logId,
+			startedAt,
+			finishedAt,
+			totalRequested: requested.length,
+			totalImported: imported,
+			totalSkipped: skipped,
+			errors,
+		}),
+	)
 
 	return {
 		ok: true,
@@ -132,10 +145,15 @@ async function runImport(options) {
 let importInFlight = null
 
 export class ImportCelebrities extends Resource {
-	static loadAsInstance = false
-
-	async post(target, data) {
+	// v5: endpoints are implemented as static methods. Harper's REST layer
+	// dispatches directly to them with the RequestTarget, so no instance is
+	// constructed and the `loadAsInstance = false` opt-out is no longer needed.
+	static async post(target, data) {
 		target.checkPermission = false
+		// REST deserializes the request body lazily, so a static `post` receives
+		// `data` as a promise — the base class's instance dispatch used to await it
+		// on our behalf. Resolve it before touching any field.
+		data = await data
 		const subset = Number.isFinite(data?.subset) ? Number(data.subset) : undefined
 
 		if (importInFlight) {
@@ -145,7 +163,9 @@ export class ImportCelebrities extends Resource {
 		// the Harper HTTP layer doesn't hold the socket open past its 60s cap,
 		// and the inner fetch() AbortSignals stay un-aborted because nothing is
 		// awaiting us. Caller polls GET /CelebrityLookalike (or scope the table)
-		// to see progress.
+		// to see progress. Under v5's async-context transactions that detachment
+		// also means the run outlives this request's transaction, which is why
+		// every table call inside it goes through `inNewTransaction`.
 		importInFlight = runImport({ subset })
 			.catch((e) => ({ ok: false, error: String(e.message || e) }))
 			.finally(() => { importInFlight = null })

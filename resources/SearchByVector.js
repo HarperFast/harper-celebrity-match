@@ -12,10 +12,15 @@ function cosineDistance(a, b) {
 }
 
 export class SearchByVector extends Resource {
-	static loadAsInstance = false
-
-	async post(target, data) {
+	// v5: endpoints are implemented as static methods. Harper's REST layer
+	// dispatches directly to them with the RequestTarget, so no instance is
+	// constructed and the `loadAsInstance = false` opt-out is no longer needed.
+	static async post(target, data) {
 		target.checkPermission = false
+		// REST deserializes the request body lazily, so a static `post` receives
+		// `data` as a promise — the base class's instance dispatch used to await it
+		// on our behalf. Resolve it before touching any field.
+		data = await data
 		const vector = data?.vector
 		const limit = Math.min(Math.max(parseInt(data?.limit, 10) || 10, 1), 50)
 		if (!Array.isArray(vector) || vector.length === 0) {
