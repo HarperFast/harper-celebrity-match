@@ -1,4 +1,4 @@
-import { Resource, tables } from 'harperdb'
+import { Resource, tables } from 'harper'
 import { embedImageBytes } from '../lib/embed.js'
 
 // Alternate match implementation that trusts the HNSW iterator to return
@@ -9,10 +9,15 @@ import { embedImageBytes } from '../lib/embed.js'
 const MAX_BYTES = 8 * 1024 * 1024
 
 export class MatchCelebrityV2 extends Resource {
-	static loadAsInstance = false
-
-	async post(target, data) {
+	// v5: endpoints are implemented as static methods. Harper's REST layer
+	// dispatches directly to them with the RequestTarget, so no instance is
+	// constructed and the `loadAsInstance = false` opt-out is no longer needed.
+	static async post(target, data) {
 		target.checkPermission = false
+		// REST deserializes the request body lazily, so a static `post` receives
+		// `data` as a promise — the base class's instance dispatch used to await it
+		// on our behalf. Resolve it before touching any field.
+		data = await data
 		const dataUrl = data?.image
 		if (typeof dataUrl !== 'string') {
 			const err = new Error('expected JSON body { image: "data:image/...;base64,..." }')
@@ -38,27 +43,15 @@ export class MatchCelebrityV2 extends Resource {
 		// Trust the HNSW iterator's distance-ascending order, ask it to
 		// fetch exactly `limit` records.
 		const matches = []
-		const debugFirstEntry = []
 		const iter = tables.Celebrity.search({
 			conditions: { attribute: 'embedding', comparator: 'lt', value: 2, target: queryVector },
 			limit,
 			select: ['name', 'category', 'wikipediaUrl', 'photoUrl', 'blurb', '$distance'],
 		})
 		for await (const r of iter) {
-			if (debugFirstEntry.length === 0) {
-				// Capture the raw row shape — what keys, what's $distance / .distance, etc.
-				debugFirstEntry.push({
-					ownKeys: Object.keys(r),
-					hasDistance: 'distance' in r,
-					hasDollarDistance: '$distance' in r,
-					distanceValue: r.distance,
-					dollarDistanceValue: r.$distance,
-					toJSON: typeof r.toJSON,
-				})
-			}
 			matches.push(r)
 		}
 
-		return { matches, debug: debugFirstEntry[0], model: 'multimodal-clip', strategy: 'iterator-order' }
+		return { matches, model: 'multimodal-clip', strategy: 'iterator-order' }
 	}
 }

@@ -4,5 +4,13 @@
   "description": "Upload an image, find the celebrity you most look like — Harper multimodal embedding demo",
   "type": "module",
   "private": true,
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "scripts": {
+    "test:integration": "harper-integration-test-run integrationTests/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@harperfast/integration-testing": "^0.4.0",
+    "harper": "^5.2.1",
+    "typescript": "^6.0.3"
+  }
 }
